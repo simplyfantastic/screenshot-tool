@@ -177,4 +177,4 @@ python screenshot.py https://github.com https://example.com https://wikipedia.or
 
 ## License
 
-MIT — free to use, modify, and share.
+simplyfantastic & co. but free to use, modify, and share.
