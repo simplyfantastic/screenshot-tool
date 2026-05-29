@@ -65,6 +65,32 @@ python screenshot.py https://example.com -o C:/Users/YourName/Desktop/shot.png
 
 ---
 
+## Embedded metadata
+
+By default, every screenshot has metadata automatically embedded inside the image file itself — no separate file needed. You can read it with any EXIF viewer, Windows Explorer's file properties panel, or tools like [ExifTool](https://exiftool.org/).
+
+The following fields are embedded:
+
+| Field | Example value |
+|---|---|
+| `URL` | `https://example.com` |
+| `PageTitle` | `Example Domain` |
+| `CapturedAt` | `2024-06-01T14:30:22Z` (UTC) |
+| `Viewport` | `1920x1080` |
+| `FullPage` | `True` |
+| `Tool` | `screenshot-tool (github.com/simplyfantastic/screenshot-tool)` |
+| `PixelSHA256` | `abb4e412...` |
+
+The **PixelSHA256** field is a SHA-256 hash of the raw pixel data at the moment of capture. If the image is ever edited or tampered with, this hash will no longer match — making it useful for court orders, audits, or any situation where you need to prove the screenshot has not been altered.
+
+To disable metadata embedding:
+
+```bash
+python screenshot.py https://example.com --no-metadata
+```
+
+---
+
 ## All options
 
 ```
@@ -85,6 +111,7 @@ python screenshot.py [URL] [options]
 | `--pdf` | Save as a PDF instead of a PNG |
 | `--format jpeg` | Save as JPEG instead of PNG |
 | `--timeout SEC` | How long to wait for the page to load before giving up (default: 30s) |
+| `--no-metadata` | Skip embedding metadata into the image file |
 
 ### Mobile devices
 

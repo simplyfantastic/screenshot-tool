@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import hashlib
+import json
 import sys
-from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 
@@ -19,6 +20,36 @@ def ensure_scheme(url: str) -> str:
     if not url.startswith(("http://", "https://")):
         return "https://" + url
     return url
+
+
+def embed_metadata(path: str, meta: dict, fmt: str) -> None:
+    from PIL import Image
+    from PIL.PngImagePlugin import PngInfo
+
+    img = Image.open(path)
+
+    # Hash the raw pixel content — stable proof of what was captured,
+    # unaffected by any later metadata edits.
+    meta["PixelSHA256"] = hashlib.sha256(img.tobytes()).hexdigest()
+
+    if fmt == "png":
+        info = PngInfo()
+        for k, v in meta.items():
+            info.add_text(k, str(v))
+        img.save(path, pnginfo=info)
+
+    elif fmt == "jpeg":
+        import piexif
+
+        exif_dict: dict = {"0th": {}, "Exif": {}}
+        exif_dict["0th"][piexif.ImageIFD.ImageDescription] = meta.get("URL", "").encode("utf-8")
+        # Store the full metadata blob in UserComment so nothing is lost.
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(
+            json.dumps(meta, ensure_ascii=False), encoding="unicode"
+        )
+        img.save(path, exif=piexif.dump(exif_dict))
+
+    img.close()
 
 
 MOBILE_DEVICES = {
@@ -45,6 +76,7 @@ async def screenshot(
     fmt: str,
     timeout: int,
     batch: list[str],
+    no_metadata: bool,
 ):
     urls = [url] + batch
 
@@ -78,7 +110,6 @@ async def screenshot(
             try:
                 await page.goto(target_url, wait_until="networkidle")
             except Exception:
-                # fall back to domcontentloaded for pages that never reach networkidle
                 await page.goto(target_url, wait_until="domcontentloaded")
 
             if wait_for:
@@ -88,6 +119,11 @@ async def screenshot(
             if wait > 0:
                 print(f"  Waiting {wait}s ...")
                 await asyncio.sleep(wait)
+
+            # Collect page info before closing context (used for metadata)
+            captured_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            page_title = await page.title() if not to_pdf else ""
+            vp = await page.evaluate("() => ({ w: window.innerWidth, h: window.innerHeight })")
 
             if to_pdf:
                 await page.pdf(path=out, format="A4", print_background=True)
@@ -102,6 +138,19 @@ async def screenshot(
             else:
                 await page.screenshot(path=out, full_page=full_page, type=fmt)
                 print(f"  Screenshot saved -> {out}")
+
+            # Embed metadata into PNG / JPEG after saving
+            if not no_metadata and not to_pdf:
+                meta = {
+                    "URL": target_url,
+                    "PageTitle": page_title,
+                    "CapturedAt": captured_at,
+                    "Viewport": f"{vp['w']}x{vp['h']}",
+                    "FullPage": str(full_page),
+                    "Tool": "screenshot-tool (github.com/simplyfantastic/screenshot-tool)",
+                }
+                embed_metadata(out, meta, fmt)
+                print(f"  Metadata embedded (URL, title, timestamp, SHA-256)")
 
             await context.close()
 
@@ -123,6 +172,7 @@ examples:
   python screenshot.py https://example.com --pdf
   python screenshot.py https://example.com --no-full-page --wait 2
   python screenshot.py https://a.com https://b.com https://c.com
+  python screenshot.py https://example.com --no-metadata
         """,
     )
 
@@ -153,6 +203,8 @@ examples:
                         help="Image format (default: png)")
     parser.add_argument("--timeout", type=int, default=30, metavar="SEC",
                         help="Navigation timeout in seconds (default: 30)")
+    parser.add_argument("--no-metadata", action="store_true",
+                        help="Skip embedding metadata into the image file")
 
     args = parser.parse_args()
 
@@ -177,6 +229,7 @@ examples:
         fmt=args.fmt,
         timeout=args.timeout,
         batch=args.batch,
+        no_metadata=args.no_metadata,
     ))
 
 
